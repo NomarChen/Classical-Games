@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#282019">
+<title>水果瑪莉・復刻跑燈盤</title>
+<style>
+:root{--gold:#d7b65b;--cream:#f1e1ae;--red:#ff4a28;--panel:#21140d}
+*{box-sizing:border-box}
+body{margin:0;background:#17120e;color:#f5e5b7;font-family:Arial,"Microsoft JhengHei",sans-serif}
+main{max-width:920px;margin:auto;padding:10px}
+h1{text-align:center;font-size:clamp(19px,4vw,30px);margin:5px 0 10px;color:#f4d36b}
+.meters{display:flex;justify-content:space-between;gap:8px;margin-bottom:8px}
+.meter{flex:1;text-align:center;min-width:0}
+.meter label{display:block;font-size:12px;letter-spacing:1px;margin-bottom:3px}
+.lcd{background:#080604;border:2px solid #746049;color:#ff4a28;font-family:monospace;font-weight:bold;font-size:clamp(23px,6vw,40px);padding:6px 2px;border-radius:4px;overflow:hidden}
+.cabinet{border:5px solid #a88c61;border-radius:15px;background:#282019;padding:clamp(7px,2vw,18px);box-shadow:inset 0 0 0 3px #71151a}
+.wheel{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:clamp(3px,1vw,9px);aspect-ratio:1/1}
+.slot{display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px solid #795e38;border-radius:8px;background:var(--cream);color:#291b11;min-width:0;min-height:0;position:relative;overflow:hidden}
+.slot.active{background:#ff3328;border-color:#fff4a5;box-shadow:0 0 12px #ff6b36;transform:scale(1.035)}
+.slot.bonus{background:#f4c542;border-color:#fff6bb}
+.slot.win{background:#fff06a;border-color:white}
+.slot.empty{background:transparent;border:0;box-shadow:none}
+.sym{font-size:clamp(12px,3vw,27px);font-weight:900;line-height:1.05;text-align:center}
+.mult{font-size:clamp(7px,1.6vw,12px);margin-top:3px;font-weight:bold}
+.bar{font-size:clamp(8px,1.7vw,14px);border:1px solid #291b11;background:#171717;color:#f5e4af;padding:2px 3px;margin:1px;border-radius:2px}
+.fruit{font-size:clamp(18px,4vw,34px)}
+.center{grid-column:2/7;grid-row:2/7;border:1px solid #6b4a22;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:radial-gradient(#4b3522,#1b120c);padding:5px}
+.center strong{font-size:clamp(15px,4vw,28px);color:#f4d36b;letter-spacing:2px}
+.mascot{font-size:clamp(48px,13vw,110px);line-height:1.1;filter:drop-shadow(0 0 8px #f4c542)}
+.center small{font-size:clamp(9px,2vw,14px);color:#dfcf9d}
+.bets{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:4px;margin-top:10px}
+.bet{padding:3px 1px;background:#21140d;border:1px solid #746049;border-radius:5px;text-align:center;min-width:0}
+.bet .amount{color:#ff4a28;font-family:monospace;font-weight:bold;font-size:clamp(15px,3.4vw,24px);min-height:1.15em}
+.bet button{width:100%;min-height:37px;border:1px solid #5e4d38;border-radius:5px;background:#f6edd1;color:#291b11;font-weight:bold;cursor:pointer;padding:2px;font-size:clamp(9px,2vw,15px)}
+.bet button:disabled,.controls button:disabled{opacity:.45}
+.controls{display:grid;grid-template-columns:1fr 1.3fr 1fr 1fr;gap:6px;margin-top:9px}
+button{touch-action:manipulation}
+.controls button{min-height:42px;border:2px outset #e6ddc2;border-radius:5px;color:#fff7d8;background:#344b55;font-weight:bold;font-size:clamp(12px,2.5vw,17px);cursor:pointer}
+.controls .start{background:#ae1719}
+.controls .clear{background:#5f5346}
+#status{min-height:2.5em;text-align:center;color:#f4d36b;font-size:13px;padding:8px 2px}
+.note{text-align:center;color:#a99a7d;font-size:11px;margin:5px 0}
+@media(max-width:430px){main{padding:5px}.cabinet{padding:6px;border-width:3px}.wheel{gap:3px}.slot{border-radius:5px;border-width:1px}.bets{gap:2px}.bet{padding:2px 0}.bet button{min-height:33px}.controls{gap:4px}.controls button{padding:3px}}
+</style>
+</head>
+<body>
+<main>
+<h1>水果瑪莉・復刻跑燈盤</h1>
+<div class="meters">
+  <div class="meter"><label>BONUS - WIN</label><div id="win" class="lcd">000000</div></div>
+  <div class="meter"><label>CREDIT</label><div id="credit" class="lcd">001000</div></div>
+</div>
+<section class="cabinet"><div id="wheel" class="wheel" aria-label="跑燈盤"></div></section>
+<div id="bets" class="bets"></div>
+<div class="controls">
+<button class="clear" id="clear">CLEAR</button>
+<button class="start" id="start">START</button>
+<button id="small">小　1–6</button>
+<button id="big">大　8–13</button>
+</div>
+<div id="status" role="status">請先選擇圖示下注。</div>
+<div class="note">離線版・虛擬點數・音效會在首次觸碰後啟用</div>
+</main>
+<script>
+(() => {
+'use strict';
+const initialCredit=1000, maxBet=50, multiplier=2;
+const symbols={
+ b:{label:'B',multiplier:25,color:'#171717'},bb:{label:'BB',multiplier:50,color:'#171717'},bbb:{label:'BBB',multiplier:100,color:'#171717'},
+ seven:{label:'77',multiplier:40,color:'#c11924'},star:{label:'雙子星',multiplier:30,color:'#e2bc32'},
+ watermelon:{label:'西瓜',multiplier:20,color:'#54a43a'},bell:{label:'金鐘',multiplier:20,color:'#dbb635'},
+ papaya:{label:'木瓜',multiplier:15,color:'#e3a224'},orange:{label:'橘子',multiplier:10,color:'#e46f12'},
+ apple:{label:'蘋果',multiplier:5,color:'#ca2327'},lychee:{label:'荔枝',multiplier:2,color:'#8dbd30'}
+};
+const positions=['orange','bell','bb','bbb','b','apple','papaya','watermelon','lychee','once-more','apple','lychee','orange','bell','lychee','seven','apple','lychee','papaya','star','lychee','once-more','apple','lychee'];
+const betGroups=['bar','seven','star','watermelon','bell','papaya','orange','apple','lychee'];
+const $=id=>document.getElementById(id);
+let credit=initialCredit,bets=Object.fromEntries(betGroups.map(k=>[k,0])),pendingWin=0;
+let active=0,spinning=false,bonusIndexes=new Set(),winIndexes=new Set(),audioCtx=null;
+const wheel=$('wheel'),betArea=$('bets');
+function enableAudio(){if(!audioCtx){const AC=window.AudioContext||window.webkitAudioContext;if(AC)audioCtx=new AC()}if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});}
+function ding(interval){
+  enableAudio();if(!audioCtx)return;
+  const t=audioCtx.currentTime;
+  // 清脆短促的雙泛音「噹」，每次跑燈跳格觸發一次。
+  const osc=audioCtx.createOscillator(),gain=audioCtx.createGain();
+  osc.type='sine';osc.frequency.setValueAtTime(1450,t);osc.frequency.exponentialRampToValueAtTime(980,t+0.045);
+  gain.gain.setValueAtTime(0.0001,t);gain.gain.exponentialRampToValueAtTime(0.12,t+0.004);
+  gain.gain.exponentialRampToValueAtTime(0.0001,t+0.095);
+  osc.connect(gain);gain.connect(audioCtx.destination);osc.start(t);osc.stop(t+0.1);
+  const o2=audioCtx.createOscillator(),g2=audioCtx.createGain();o2.type='sine';o2.frequency.setValueAtTime(2100,t);
+  g2.gain.setValueAtTime(0.0001,t);g2.gain.exponentialRampToValueAtTime(0.035,t+0.003);g2.gain.exponentialRampToValueAtTime(0.0001,t+0.055);
+  o2.connect(g2);g2.connect(audioCtx.destination);o2.start(t);o2.stop(t+0.06);
+}
+function displayNum(n){return String(Math.max(0,Math.floor(n))).padStart(6,'0').slice(-6)}
+function renderWheel(){
+ wheel.innerHTML='';
+ // Explicitly place only the 24 perimeter lamps. The inner 5x5 area is one
+ // centered panel; do not generate empty cells there (they disturb CSS auto-placement).
+ const byCell=new Map();
+ positions.forEach((id,i)=>{
+   let r,c;
+   if(i<=6){r=0;c=i;}                 // top: left -> right
+   else if(i<=11){r=i-6;c=6;}         // right: top -> bottom
+   else if(i<=18){r=6;c=18-i;}        // bottom: right -> left
+   else {r=24-i;c=0;}                 // left: bottom -> top
+   byCell.set(`${r},${c}`,{id,i});
+ });
+ const center=document.createElement('div');
+ center.className='center';
+ center.style.gridColumn='2 / 7';
+ center.style.gridRow='2 / 7';
+ center.innerHTML='<strong>RUN LIGHT</strong><div class="mascot">⭐</div><small>祝你好運！</small>';
+ wheel.appendChild(center);
+ for(const [key,item] of byCell){
+   const [r,c]=key.split(',').map(Number);
+   const el=document.createElement('div');el.className='slot';el.dataset.index=item.i;
+   el.style.gridRow=String(r+1);el.style.gridColumn=String(c+1);
+   const id=item.id;
+   if(id==='once-more')el.innerHTML='<div class="sym">ONCE<br>MORE</div>';
+   else if(['b','bb','bbb'].includes(id)){let count=id==='b'?1:id==='bb'?2:3;el.innerHTML=Array.from({length:count},()=>'<div class="bar">BAR</div>').join('');}
+   else if(id==='seven')el.innerHTML='<div class="sym" style="color:#c11924">77</div>';
+   else if(id==='star')el.innerHTML='<div class="sym" style="color:#b38b00">★★</div>';
+   else {const emoji={watermelon:'🍉',bell:'🔔',papaya:'🥭',orange:'🍊',apple:'🍎',lychee:'🟢'}[id]||'⭐';
+     el.innerHTML=`<div class="fruit">${emoji}</div><div class="mult">×${symbols[id].multiplier}</div>`;}
+   wheel.appendChild(el);
+ }
+ updateWheel();
+}
+function updateWheel(){
+ wheel.querySelectorAll('.slot[data-index]').forEach(el=>{
+   const i=Number(el.dataset.index);el.classList.toggle('active',i===active);el.classList.toggle('bonus',bonusIndexes.has(i));el.classList.toggle('win',winIndexes.has(i)&&Math.floor(Date.now()/140)%2===0);
+ });
+}
+function renderBets(){
+ betArea.innerHTML='';
+ betGroups.forEach(key=>{
+   const b=document.createElement('div');b.className='bet';
+   let label=key==='bar'?'BAR':symbols[key].label;
+   b.innerHTML=`<div class="amount" id="bet-${key}">00</div><button type="button" data-bet="${key}" aria-label="押注 ${label}">${key==='bar'?'BAR':key==='seven'?'77':key==='star'?'★★':({watermelon:'🍉',bell:'🔔',papaya:'🥭',orange:'🍊',apple:'🍎',lychee:'🟢'})[key]}</button>`;
+   betArea.appendChild(b);
+ });
+ betArea.querySelectorAll('[data-bet]').forEach(btn=>btn.addEventListener('click',()=>placeBet(btn.dataset.bet)));
+}
+function refresh(){
+ $('win').textContent=displayNum(pendingWin);$('credit').textContent=displayNum(credit);
+ betGroups.forEach(k=>{const e=$('bet-'+k);if(e)e.textContent=String(bets[k]).padStart(2,'0')});
+ betArea.querySelectorAll('button').forEach(b=>b.disabled=spinning);
+ $('start').disabled=spinning||totalBet()<1;$('clear').disabled=spinning||totalBet()<1;
+ $('small').disabled=spinning||pendingWin<=0;$('big').disabled=spinning||pendingWin<=0;
+ updateWheel();
+}
+function say(s){$('status').textContent=s}
+function totalBet(){return Object.values(bets).reduce((a,b)=>a+b,0)}
+function collect(){if(pendingWin<=0)return false;credit+=pendingWin;pendingWin=0;return true}
+function placeBet(k){
+ enableAudio();const collected=collect();
+ if(bets[k]>=maxBet){say('此圖示已達單燈押分上限。');refresh();return}
+ if(credit<=0){say('CREDIT 不足。');refresh();return}
+ bets[k]++;credit--;say((collected?'已收分；':'')+'已加押 1 分。');refresh();
+}
+function clearBets(){credit+=totalBet();bets=Object.fromEntries(betGroups.map(k=>[k,0]));say('已清除本次押分。');refresh()}
+function betKey(id){return ['b','bb','bbb'].includes(id)?'bar':id}
+function award(id){return (bets[betKey(id)]||0)*symbols[id].multiplier}
+function wait(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
+async function spinTo(target){
+ const laps=4,steps=24*laps+((target-active+24)%24);
+ for(let step=0;step<steps;step++){
+   active=(active+1)%24;ding();
+   const remaining=steps-step-1,slowSteps=10;
+   updateWheel();
+   if(remaining>slowSteps)await wait(24);
+   else await wait(30+(slowSteps-remaining)*12);
+ }
+ active=target;updateWheel();
+}
+function weightedTarget(){return Math.floor(Math.random()*24)}
+function settle(id){
+ const amount=award(id);
+ if(amount>0){pendingWin+=amount;say(`中 ${symbols[id].label}！${bets[betKey(id)]} 分 × ${symbols[id].multiplier} ＝ ${amount} 分。`);winIndexes=new Set([active]);}
+ else say(id==='once-more'?'ONCE MORE！':'停在 '+symbols[id].label+'；這一燈沒有押注。');
+}
+async function runBonus(){
+ const eligible=positions.map((id,i)=>({id,i})).filter(x=>x.id!=='once-more');
+ const count=1+Math.floor(Math.random()*3);
+ for(let j=0;j<count;j++){
+   const item=eligible.splice(Math.floor(Math.random()*eligible.length),1)[0];bonusIndexes=new Set([item.i]);updateWheel();
+   await wait(350);await spinTo(item.i);const id=positions[active],amount=award(id);
+   if(amount){pendingWin+=amount;winIndexes=new Set([active]);say(`${symbols[id].label} +${amount}`)}
+   else say(`${symbols[id].label} 未押`);
+   refresh();await wait(420);
+ }
+ bonusIndexes.clear();winIndexes.clear();say('送燈完成。可收分，或猜大／小。');
+}
+async function startGame(){
+ enableAudio();if(spinning)return;if(collect())say('已收分，開始新一局。');
+ if(!totalBet()){say('請先下注。');refresh();return}
+ spinning=true;refresh();say('跑燈中⋯⋯');
+ try{
+   await spinTo(weightedTarget());const id=positions[active];
+   if(id==='once-more'){say('ONCE MORE！準備送燈。');await wait(500);await runBonus()}
+   else settle(id);
+ }catch(e){say('遊戲發生錯誤，請重新開始。');console.error(e)}
+ finally{spinning=false;refresh();if(pendingWin>0)say($('status').textContent+' 可收分，或猜大／小。');}
+}
+function gamble(choice){
+ enableAudio();if(!pendingWin||spinning)return;
+ const n=1+Math.floor(Math.random()*13),win=choice==='small'?(n>=1&&n<=6):(n>=8&&n<=13);
+ if(win){pendingWin*=multiplier;say(`開出 ${n}，猜中！獎分加倍。`)}
+ else{pendingWin=0;say(`開出 ${n}，猜錯，這次比倍歸零。`)}
+ refresh();
+}
+$('clear').addEventListener('click',()=>{enableAudio();clearBets()});
+$('start').addEventListener('click',startGame);
+$('small').addEventListener('click',()=>gamble('small'));
+$('big').addEventListener('click',()=>gamble('big'));
+renderWheel();renderBets();refresh();
+})();
+</script>
+</body>
+</html>
