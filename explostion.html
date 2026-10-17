@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTML5 爆爆王 - LINE 對戰版</title>
+    <!-- 引入 PeerJS 用於 P2P 玩家對戰連線 -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+        #game-container {
+            display: inline-block;
+            position: relative;
+        }
+        canvas {
+            background-color: #388e3c;
+            border: 4px solid #333;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+        }
+        .ui-panel {
+            margin: 10px 0;
+        }
+        button, input {
+            padding: 10px 15px;
+            font-size: 16px;
+            margin: 5px;
+            border-radius: 5px;
+            border: none;
+            cursor: pointer;
+        }
+        button { background-color: #00b900; color: white; font-weight: bold; }
+        button:hover { background-color: #009900; }
+        #room-info { font-size: 18px; color: #ffeb3b; margin: 10px; }
+    </style>
+</head>
+<body>
+
+    <h2>🔥 HTML5 爆爆王 (Crazy Arcade) 🔥</h2>
+    
+    <div class="ui-panel" id="menu">
+        <button onclick="createRoom()">建立房間 (當房主)</button>
+        <br>
+        <input type="text" id="roomIdInput" placeholder="輸入好友的房間代碼">
+        <button onclick="joinRoom()">加入好友房間</button>
+    </div>
+
+    <div id="room-info"></div>
+
+    <div id="game-container" style="display:none;">
+        <canvas id="gameCanvas" width="480" height="480"></canvas>
+        <p>控制方式：使用 <b>方向鍵</b> 移動，按下 <b>空白鍵 (Space)</b> 放置水球</p>
+        <button id="lineShareBtn" style="display:none;" onclick="shareToLine()">📤 傳送邀請給 LINE 好友</button>
+    </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const TILE_SIZE = 40;
+const MAP_SIZE = 12; // 12x12 格
+
+// 地圖定義: 0 = 空地, 1 = 固定的牆, 2 = 可破壞磚塊
+let map = [
+    [1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,2,2,0,0,2,2,0,0,1],
+    [1,0,1,2,1,2,2,1,2,1,0,1],
+    [1,2,2,2,2,2,2,2,2,2,2,1],
+    [1,2,1,2,1,2,2,1,2,1,2,1],
+    [1,2,2,2,2,2,2,2,2,2,2,1],
+    [1,2,2,2,2,2,2,2,2,2,2,1],
+    [1,2,1,2,1,2,2,1,2,1,2,1],
+    [1,2,2,2,2,2,2,2,2,2,2,1],
+    [1,0,1,2,1,2,2,1,2,1,0,1],
+    [1,0,0,2,2,0,0,2,2,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1]
+];
+
+let players = {
+    1: { x: 40, y: 40, color: 'blue', alive: true },
+    2: { x: 400, y: 400, color: 'red', alive: true }
+};
+
+let bombs = [];
+let explosions = [];
+
+// 網路對戰變數 (PeerJS)
+let peer, conn;
+let myId = '';
+let playerRole = 1; // 1 為房主, 2 為加入者
+
+function createRoom() {
+    peer = new Peer();
+    peer.on('open', (id) => {
+        myId = id;
+        playerRole = 1;
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('room-info').innerText = `你的房間代碼: ${myId} (等待好友加入...)`;
+        document.getElementById('lineShareBtn').style.display = 'inline-block';
+        document.getElementById('game-container').style.display = 'inline-block';
+        initGame();
+    });
+
+    peer.on('connection', (connection) => {
+        conn = connection;
+        setupConnection();
+        document.getElementById('room-info').innerText = "好友已加入！遊戲開始！";
+    });
+}
+
+function joinRoom() {
+    const roomId = document.getElementById('roomIdInput').value;
+    if(!roomId) return alert('請輸入房間代碼！');
+    
+    peer = new Peer();
+    peer.on('open', () => {
+        playerRole = 2;
+        conn = peer.connect(roomId);
+        setupConnection();
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('room-info').innerText = "已成功連線到房主！";
+        document.getElementById('game-container').style.display = 'inline-block';
+        initGame();
+    });
+}
+
+function setupConnection() {
+    conn.on('data', (data) => {
+        if (data.type === 'position') {
+            players[3 - playerRole].x = data.x;
+            players[3 - playerRole].y = data.y;
+        } else if (data.type === 'bomb') {
+            bombs.push(data.bomb);
+        } else if (data.type === 'update_map') {
+            map = data.map;
+        }
+    });
+}
+
+function shareToLine() {
+    const inviteUrl = window.location.href.split('?')[0] + `?room=${myId}`;
+    const lineShareUrl = `https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(inviteUrl)}`;
+    window.open(lineShareUrl, '_blank');
+}
+
+// 鍵盤控制
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.code] = true; if(e.code === 'Space') placeBomb(); });
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+function initGame() {
+    // 檢查網址是否有自動帶入 room 參數
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomParam = urlParams.get('room');
+    if (roomParam && playerRole === 1) {
+        document.getElementById('roomIdInput').value = roomParam;
+        joinRoom();
+    }
+    
+    requestAnimationFrame(gameLoop);
+}
+
+function update() {
+    let p = players[playerRole];
+    if (!p.alive) return;
+
+    let speed = 3;
+    let dx = 0, dy = 0;
+
+    if (keys['ArrowUp'] || keys['KeyW']) dy = -speed;
+    if (keys['ArrowDown'] || keys['KeyS']) dy = speed;
+    if (keys['ArrowLeft'] || keys['KeyA']) dx = -speed;
+    if (keys['ArrowRight'] || keys['KeyD']) dx = speed;
+
+    if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
+
+    // 簡單碰撞偵測
+    if (!checkCollision(p.x + dx, p.y)) p.x += dx;
+    if (!checkCollision(p.x, p.y + dy)) p.y += dy;
+
+    // 傳送位置給對手
+    if (conn && conn.open) {
+        conn.send({ type: 'position', x: p.x, y: p.y });
+    }
+}
+
+function checkCollision(x, y) {
+    let r = 15; // 玩家碰撞半徑
+    let corners = [
+        {x: x - r, y: y - r}, {x: x + r, y: y - r},
+        {x: x - r, y: y + r}, {x: x + r, y: y + r}
+    ];
+    for (let c of corners) {
+        let mx = Math.floor(c.x / TILE_SIZE);
+        let my = Math.floor(c.y / TILE_SIZE);
+        if (mx < 0 || mx >= MAP_SIZE || my < 0 || my >= MAP_SIZE) return true;
+        if (map[my][mx] > 0) return true;
+    }
+    return false;
+}
+
+function placeBomb() {
+    let p = players[playerRole];
+    let bx = Math.floor((p.x + TILE_SIZE/2) / TILE_SIZE) * TILE_SIZE;
+    let by = Math.floor((p.y + TILE_SIZE/2) / TILE_SIZE) * TILE_SIZE;
+
+    // 避免重複放置
+    if (bombs.some(b => b.x === bx && b.y === by)) return;
+
+    let newBomb = { x: bx, y: by, timer: 180, range: 2, owner: playerRole };
+    bombs.push(newBomb);
+
+    if (conn && conn.open) {
+        conn.send({ type: 'bomb', bomb: newBomb });
+    }
+
+    setTimeout(() => explodeBomb(newBomb), 3000);
+}
+
+function explodeBomb(bomb) {
+    let index = bombs.indexOf(bomb);
+    if (index > -1) bombs.splice(index, 1);
+
+    // 產生十字形爆炸特效
+    let expList = [{x: bomb.x, y: bomb.y}];
+    let directions = [{x: 0, y: -1}, {x: 0, y: 1}, {x: -1, y: 0}, {x: 1, y: 0}];
+
+    directions.forEach(dir => {
+        for (let i = 1; i <= bomb.range; i++) {
+            let ex = bomb.x + dir.x * i * TILE_SIZE;
+            let ey = bomb.y + dir.y * i * TILE_SIZE;
+            let mx = Math.floor(ex / TILE_SIZE);
+            let my = Math.floor(ey / TILE_SIZE);
+
+            if (mx < 0 || mx >= MAP_SIZE || my < 0 || my >= MAP_SIZE) break;
+            if (map[my][mx] === 1) break; // 固定的牆擋住
+
+            expList.push({x: ex, y: ey});
+
+            if (map[my][mx] === 2) {
+                map[my][mx] = 0; // 炸毀磚塊
+                if (playerRole === 1 && conn && conn.open) {
+                    conn.send({ type: 'update_map', map: map });
+                }
+                break; // 磚塊會擋住後續爆炸
+            }
+        }
+    });
+
+    explosions.push({ list: expList, duration: 20 });
+
+    // 檢查是否炸到玩家
+    expList.forEach(e => {
+        for (let id in players) {
+            let p = players[id];
+            if (Math.abs(p.x - e.x) < 20 && Math.abs(p.y - e.y) < 20) {
+                p.alive = false;
+                alert(`玩家 ${id} 被炸死了！遊戲結束！`);
+            }
+        }
+    });
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 1. 繪製地圖
+    for (let r = 0; r < MAP_SIZE; r++) {
+        for (let c = 0; c < MAP_SIZE; c++) {
+            if (map[r][c] === 1) {
+                ctx.fillStyle = '#555';
+                ctx.fillRect(c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            } else if (map[r][c] === 2) {
+                ctx.fillStyle = '#8d6e63';
+                ctx.fillRect(c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                ctx.strokeStyle = '#5d4037';
+                ctx.strokeRect(c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            }
+        }
+    }
+
+    // 2. 繪製水球
+    ctx.fillStyle = '#00bcd4';
+    bombs.forEach(b => {
+        ctx.beginPath();
+        ctx.arc(b.x + TILE_SIZE/2, b.y + TILE_SIZE/2, 15, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    // 3. 繪製爆炸火焰
+    ctx.fillStyle = '#ff5722';
+    explosions.forEach((exp, idx) => {
+        exp.list.forEach(e => {
+            ctx.fillRect(e.x + 5, e.y + 5, TILE_SIZE - 10, TILE_SIZE - 10);
+        });
+        exp.duration--;
+        if (exp.duration <= 0) explosions.splice(idx, 1);
+    });
+
+    // 4. 繪製玩家
+    for (let id in players) {
+        let p = players[id];
+        if (!p.alive) continue;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 16, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+}
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+</script>
+
+</body>
+</html>
