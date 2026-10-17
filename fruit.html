@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#10251d">
+<title>經典水果盤</title>
+<style>
+:root{color-scheme:dark;--bg:#10251d;--panel:#1a3a2b;--gold:#d0a84e;--cream:#fff4d7;--text:#f7edcf}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Noto Sans TC","Microsoft JhengHei",sans-serif}
+main{max-width:900px;margin:auto;padding:12px}
+header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 12px}
+h1{font-size:clamp(22px,5vw,34px);margin:0;color:#f4ca62}
+.sub{font-size:12px;color:#bad0b4;margin-top:3px}
+.credits{font-size:clamp(19px,4vw,26px);font-weight:800;color:#ffe28a;white-space:nowrap}
+.machine{background:var(--panel);border:3px solid #bc8b35;border-radius:18px;padding:8px}
+canvas{display:block;width:100%;height:auto;aspect-ratio:1.24;background:#183727;border-radius:10px;touch-action:manipulation}
+.controls{background:var(--panel);border:2px solid #6e824e;border-radius:14px;padding:12px;margin-top:10px}
+.message{min-height:42px;font-weight:650;line-height:1.45;margin-bottom:8px}
+.betrow{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.betvalue{flex:1;text-align:center;font-size:18px;font-weight:700}
+button{border:2px solid #70916a;border-radius:10px;background:#315c43;color:#fff6dc;padding:12px 14px;font-size:16px;font-weight:750;min-height:46px;touch-action:manipulation}
+button:active{transform:translateY(1px);filter:brightness(1.15)}
+button:disabled{opacity:.45}
+button.primary{background:#c44432;border-color:#ed9a53;font-size:20px;flex:1}
+button.small{min-width:48px}
+button.full{width:100%;margin-bottom:8px}
+.details{font-size:13px;color:#e4d7b2;line-height:1.7;margin-top:8px}
+.row{display:flex;gap:8px}
+.row>*{flex:1}
+.soundrow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
+.soundrow button{font-size:13px;padding:8px 10px;min-height:38px}
+@media(min-width:700px){.layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(260px,1fr);gap:12px;align-items:start}.controls{margin-top:0}main{padding:18px}}
+</style>
+</head>
+<body>
+<main>
+<header><div><h1>🍒 經典水果盤 🍒</h1><div class="sub">九宮格水果盤 · 點擊開始轉動</div></div><div class="credits" id="credits">點數 10,000</div></header>
+<div class="layout">
+<section class="machine"><canvas id="board" width="720" height="580" aria-label="水果盤轉盤"></canvas></section>
+<section class="controls">
+<div class="message" id="message">選擇押注，按「開始」試試手氣！</div>
+<div class="betrow"><button class="small" id="minus" aria-label="減少押注">−</button><div class="betvalue" id="bet">每局押注 1</div><button class="small" id="plus" aria-label="增加押注">+</button></div>
+<button class="full" id="max">押滿（80）</button>
+<button class="primary full" id="spin">開始</button>
+<div class="details" id="linebets"></div>
+<div class="details" id="paytable"></div>
+<div class="soundrow"><span>轉盤經過圖示時會同步「噹」一聲</span><button id="sound">音效：開</button></div>
+<button class="full" id="reset" style="margin-top:8px">重置遊戲</button>
+</section>
+</div>
+</main>
+<script>
+(() => {
+'use strict';
+const SYMBOLS = [
+ {emoji:'🍒',name:'櫻桃',mult:2},{emoji:'🍋',name:'檸檬',mult:4},
+ {emoji:'🍊',name:'橘子',mult:6},{emoji:'🍇',name:'葡萄',mult:8},
+ {emoji:'🔔',name:'鈴鐺',mult:12},{emoji:'⭐',name:'星星',mult:20},
+ {emoji:'7️⃣',name:'幸運 7',mult:50}
+];
+const FRUITS = SYMBOLS.slice(0,4), FRUIT_BONUS=200, ALL_SAME_MULTIPLIER=1000;
+const PAYLINES=[
+ ['中橫線',[[1,0],[1,1],[1,2]]],['上橫線',[[0,0],[0,1],[0,2]]],
+ ['下橫線',[[2,0],[2,1],[2,2]]],['斜線 ↘',[[0,0],[1,1],[2,2]]],
+ ['斜線 ↙',[[0,2],[1,1],[2,0]]],['左直線',[[0,0],[1,0],[2,0]]],
+ ['中直線',[[0,1],[1,1],[2,1]]],['右直線',[[0,2],[1,2],[2,2]]]
+];
+const MAX_BET=80;
+const canvas=document.getElementById('board'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+let credits=10000,bet=1,spinning=false,soundOn=true,raf=0,lastTime=0;
+let strips=[],offsets=[0,0,0],speeds=[0,0,0],stopping=[false,false,false],stopped=[true,true,true];
+let stopElapsed=[0,0,0],stopDurations=[0,0,0],stopStart=[0,0,0],stopDistances=[0,0,0],stopShifts=[0,0,0],feeds=[[],[],[]];
+let targetGrid=null,spinStart=0,winningLines=[],fruitPlate=false,allSame=false;
+function pick(){return SYMBOLS[Math.floor(Math.random()*SYMBOLS.length)]}
+function makeStrip(rows){return [pick(),...rows,pick()]}
+function initBoard(){strips=[makeStrip([SYMBOLS[0],SYMBOLS[1],SYMBOLS[2]]),makeStrip([SYMBOLS[3],SYMBOLS[4],SYMBOLS[5]]),makeStrip([SYMBOLS[6],SYMBOLS[0],SYMBOLS[1]])];draw()}
+function lineBets(total){const arr=Array(8).fill(0);for(let i=0;i<total;i++)arr[i%8]++;return arr}
+function playDing(speedRatio=1){
+ if(!soundOn)return;
+ try{
+  const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
+  if(!playDing.ac)playDing.ac=new AC();
+  const ac=playDing.ac;if(ac.state==='suspended')ac.resume();
+  const now=ac.currentTime,osc=ac.createOscillator(),gain=ac.createGain();
+  osc.type='sine';osc.frequency.setValueAtTime(1350,now);osc.frequency.exponentialRampToValueAtTime(760,now+0.065);
+  gain.gain.setValueAtTime(Math.min(.22,.08+speedRatio*.05),now);gain.gain.exponentialRampToValueAtTime(.001,now+.09);
+  osc.connect(gain);gain.connect(ac.destination);osc.start(now);osc.stop(now+.095);
+ }catch(e){}
+}
+function resultTone(kind){
+ if(!soundOn)return;
+ try{
+  const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
+  if(!playDing.ac)playDing.ac=new AC();const ac=playDing.ac;if(ac.state==='suspended')ac.resume();
+  const notes=kind==='jackpot'?[523,659,784,1047,1318]:kind==='win'?[784,988,1175]:[260];
+  notes.forEach((f,i)=>{const o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime+i*.12;o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.13,t+.015);g.gain.exponentialRampToValueAtTime(.0001,t+.22);o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+.23)});
+ }catch(e){}
+}
+function geom(){const w=canvas.width,h=canvas.height;return {w,h,x:66,y:66,gw:w-86,gh:h-86}}
+function draw(){
+ const {w,h,x,y,gw,gh}=geom();ctx.clearRect(0,0,w,h);ctx.fillStyle='#183727';ctx.fillRect(0,0,w,h);
+ ctx.lineWidth=7;ctx.strokeStyle=fruitPlate?'#ffcc00':'#d0a84e';ctx.fillStyle=fruitPlate?'#523810':'#422b17';roundRect(x,y,gw,gh,16,true,true);
+ const inset=10,ix=x+inset,iy=y+inset,iw=gw-2*inset,ih=gh-2*inset,cw=iw/3,ch=ih/3;
+ ctx.save();ctx.beginPath();ctx.rect(x,y,gw,gh);ctx.clip();
+ for(let c=0;c<3;c++){
+  for(let sr=-1;sr<4;sr++){
+   const xx=ix+c*cw,yy=iy+sr*ch+offsets[c];ctx.fillStyle='#fff4d7';ctx.fillRect(xx,yy,cw,ch);ctx.strokeStyle='#dcc78f';ctx.lineWidth=1;ctx.strokeRect(xx,yy,cw,ch);
+   const sym=strips[c][sr+1]||pick();ctx.font=`${Math.max(32,Math.round(ch*.55))}px "Apple Color Emoji","Segoe UI Emoji",sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#281d12';ctx.fillText(sym.emoji,xx+cw/2,yy+ch/2+2);
+  }
+ }
+ ctx.strokeStyle='#9b7636';ctx.lineWidth=3;
+ for(let c=1;c<3;c++){ctx.beginPath();ctx.moveTo(ix+c*cw,iy);ctx.lineTo(ix+c*cw,iy+ih);ctx.stroke()}
+ for(let r=1;r<3;r++){ctx.beginPath();ctx.moveTo(ix,iy+r*ch);ctx.lineTo(ix+iw,iy+r*ch);ctx.stroke()}
+ winningLines.forEach(cells=>{const pts=cells.map(([r,c])=>[ix+(c+.5)*cw,iy+(r+.5)*ch]);ctx.strokeStyle='rgba(255,71,45,.9)';ctx.lineWidth=8;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(...pts[0]);pts.slice(1).forEach(p=>ctx.lineTo(...p));ctx.stroke()});
+ ctx.restore();
+ const lb=lineBets(bet);ctx.font='bold 15px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+ [[1,0],[0,1],[2,2],[0,3],[2,4]].forEach(([r,i])=>{const yy=iy+(r+.5)*ch;ctx.fillStyle='rgba(0,0,0,.75)';ctx.fillRect(ix-58,yy-13,52,26);ctx.fillStyle='#ffe28a';ctx.fillText(lb[i]+'分',ix-32,yy)});
+ [[5,0],[6,1],[7,2]].forEach(([i,c])=>{const xx=ix+(c+.5)*cw;ctx.fillStyle='rgba(0,0,0,.75)';ctx.fillRect(xx-26,iy-35,52,26);ctx.fillStyle='#ffe28a';ctx.fillText(lb[i]+'分',xx,iy-22)});
+}
+function roundRect(x,y,w,h,r,fill,stroke){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();if(fill)ctx.fill();if(stroke)ctx.stroke()}
+function visibleGrid(){return [[strips[0][1],strips[1][1],strips[2][1]],[strips[0][2],strips[1][2],strips[2][2]],[strips[0][3],strips[1][3],strips[2][3]]]}
+function evaluate(grid){
+ const lb=lineBets(bet),wins=[];let payout=0;
+ PAYLINES.forEach(([name,cells],i)=>{if(!lb[i])return;const syms=cells.map(([r,c])=>grid[r][c]);if(syms[0]===syms[1]&&syms[1]===syms[2]){const p=lb[i]*syms[0].mult;payout+=p;wins.push({name,cells,symbol:syms[0],payout:p})}});
+ const same=grid.every(row=>row.every(s=>s===grid[0][0]));
+ const fruit=grid.every(row=>row.every(s=>FRUITS.includes(s)));
+ let jackpot=0;if(same)jackpot=lb[0]*grid[0][0].mult*ALL_SAME_MULTIPLIER;else if(fruit)jackpot=FRUIT_BONUS;
+ return {wins,payout:payout+jackpot,jackpot,same,fruit};
+}
+function updateUI(){
+ $('credits').textContent='點數 '+credits.toLocaleString('en-US');$('bet').textContent='每局押注 '+bet;
+ $('minus').disabled=spinning||bet<=1;$('plus').disabled=spinning||bet>=MAX_BET;$('max').disabled=spinning||bet>=MAX_BET;$('spin').disabled=spinning;
+ const lb=lineBets(bet);$('linebets').textContent='各線押分：'+PAYLINES.map((p,i)=>p[0]+' '+lb[i]+'分').join('　');
+ $('paytable').textContent='單線賠率：'+SYMBOLS.map(s=>s.emoji+'×'+s.mult).join('　')+'。水果盤：九格全為水果 +200 分；九格全同：中橫押分 × 圖示倍率 ×1000。';
+}
+function startSpin(){
+ if(spinning)return;if(credits<bet){$('message').textContent='點數不足，請重置遊戲。';return}
+ if(playDing.ac&&playDing.ac.state==='suspended')playDing.ac.resume().catch(()=>{});
+ credits-=bet;spinning=true;winningLines=[];fruitPlate=false;allSame=false;
+ targetGrid=Array.from({length:3},()=>Array.from({length:3},pick));
+ offsets=[0,0,0];speeds=[1000,1080,1160];stopping=[false,false,false];stopped=[false,false,false];stopElapsed=[0,0,0];stopDurations=[0,0,0];stopShifts=[0,0,0];feeds=[[],[],[]];
+ spinStart=performance.now();lastTime=spinStart;$('message').textContent='轉盤轉動中……';updateUI();raf=requestAnimationFrame(frame);
+}
+function requestStop(c,ch){
+ if(stopping[c]||stopped[c])return;
+ const distance=4*ch-offsets[c];
+ feeds[c]=[targetGrid[2][c],targetGrid[1][c],targetGrid[0][c],pick()];
+ stopShifts[c]=0;stopping[c]=true;stopElapsed[c]=0;stopStart[c]=offsets[c];stopDistances[c]=distance;
+ stopDurations[c]=Math.max(.42,2*distance/Math.max(speeds[c],1));
+}
+function pushSymbol(c,sym){strips[c].unshift(sym);strips[c].pop()}
+function frame(now){
+ if(!spinning)return;const dt=Math.min(.05,(now-lastTime)/1000);lastTime=now;
+ const elapsed=(now-spinStart)/1000;const {gh}=geom(),ch=(gh-20)/3;
+ for(let c=0;c<3;c++){
+  if(stopped[c])continue;
+  if(!stopping[c]&&elapsed>=[.95,1.55,2.15][c])requestStop(c,ch);
+  if(stopping[c]){
+   stopElapsed[c]+=dt;const p=Math.min(1,stopElapsed[c]/stopDurations[c]),ease=1-(1-p)*(1-p);
+   const pos=stopStart[c]+stopDistances[c]*ease,shifts=Math.floor(pos/ch+1e-7);
+   while(stopShifts[c]<shifts&&feeds[c].length){pushSymbol(c,feeds[c].shift());stopShifts[c]++;playDing(Math.max(.15,1-p))}
+   offsets[c]=Math.min(ch,Math.max(0,pos-stopShifts[c]*ch));
+   if(p>=1){while(feeds[c].length){pushSymbol(c,feeds[c].shift());playDing(.15)}offsets[c]=0;speeds[c]=0;stopped[c]=true}
+  }else{
+   const speed=speeds[c];offsets[c]+=speed*dt;
+   while(offsets[c]>=ch){offsets[c]-=ch;pushSymbol(c,pick());playDing(1)}
+  }
+ }
+ draw();
+ if(stopped.every(Boolean)){spinning=false;finishSpin();return}
+ raf=requestAnimationFrame(frame);
+}
+function finishSpin(){
+ const grid=visibleGrid(),res=evaluate(grid);winningLines=res.wins.map(w=>w.cells);fruitPlate=res.jackpot>0&&res.fruit&&!res.same;allSame=res.same;credits+=res.payout;draw();
+ let msg;
+ if(res.jackpot&&res.fruit&&!res.same)msg=`水果盤大獎！九格皆為水果 (+${FRUIT_BONUS}分)，合計贏得 ${res.payout} 點！`;
+ else if(res.jackpot)msg=`九格全${grid[0][0].name}！九宮格加碼 ${res.jackpot} 點，合計贏得 ${res.payout} 點！`;
+ else if(res.wins.length)msg=`${res.wins.map(w=>w.name).join('、')}中獎！共贏得 ${res.payout} 點！`;
+ else msg='沒有連線，再拉一次試試手氣！';
+ $('message').textContent=msg;resultTone(res.jackpot?'jackpot':res.wins.length?'win':'lose');updateUI();
+}
+$('minus').addEventListener('click',()=>{if(!spinning){bet=Math.max(1,bet-1);draw();updateUI()}});
+$('plus').addEventListener('click',()=>{if(!spinning){bet=Math.min(MAX_BET,bet+1);draw();updateUI()}});
+$('max').addEventListener('click',()=>{if(!spinning){bet=MAX_BET;draw();updateUI()}});
+$('spin').addEventListener('click',startSpin);
+$('sound').addEventListener('click',()=>{soundOn=!soundOn;$('sound').textContent='音效：'+(soundOn?'開':'關');if(soundOn)playDing(1)});
+$('reset').addEventListener('click',()=>{cancelAnimationFrame(raf);spinning=false;credits=10000;bet=1;offsets=[0,0,0];stopped=[true,true,true];stopping=[false,false,false];winningLines=[];fruitPlate=false;allSame=false;initBoard();$('message').textContent='遊戲已重置，祝你好運！';updateUI()});
+window.addEventListener('resize',draw);
+initBoard();updateUI();
+})();
+</script>
+</body>
+</html>
