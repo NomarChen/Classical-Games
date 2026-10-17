@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>經典 Arcade 7PK 網頁版 (擬真牌面與小彩池)</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --table-bg: #0A2F1D;
+            --gold: #D4AF37;
+            --text-main: #FFFFFF;
+        }
+        * { box-sizing: border-box; user-select: none; }
+        body {
+            margin: 0; padding: 4px;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex; flex-direction: column; align-items: center;
+        }
+        .container {
+            width: 100%; max-width: 480px;
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .panel {
+            background: #1E1E1E; border: 1px solid #333; border-radius: 6px; padding: 6px; font-size: 12px;
+        }
+        
+        /* 頂部看板雙拼區：左邊JP、右邊小彩池 */
+        .top-panels {
+            display: grid; grid-template-columns: 2fr 1fr; gap: 4px;
+        }
+        .jackpot-panel {
+            background: linear-gradient(to bottom, #3A0007, #1A0003);
+            border: 2px solid var(--gold);
+            padding: 6px; border-radius: 6px;
+            display: flex; flex-direction: column; justify-content: center;
+        }
+        .side-pot-panel {
+            background: linear-gradient(to bottom, #12241A, #0A140E);
+            border: 2px solid #00CC66;
+            padding: 6px; border-radius: 6px;
+            display: flex; flex-direction: column; justify-content: center;
+        }
+        .jp-val { font-family: 'Impact', sans-serif; font-size: 18px; color: #00FFCC; }
+        .sp-val { font-family: 'Impact', sans-serif; font-size: 14px; color: #00FF99; }
+
+        /* 擬真撲克牌盒 */
+        .table-frame {
+            background-color: var(--table-bg);
+            border: 2px solid var(--gold);
+            border-radius: 8px;
+            padding: 8px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+            justify-items: center;
+        }
+        .card-box {
+            background-color: #1B4D3E;
+            border: 2px solid #555;
+            border-radius: 6px;
+            width: 72px; height: 100px;
+            display: flex; flex-direction: column; justify-content: space-between;
+            align-items: center; padding: 2px;
+            position: relative;
+        }
+        .card-box.visible {
+            background-color: #FFFFFF;
+            border: 2px solid var(--gold);
+        }
+        .card-pos { font-size: 8px; color: var(--gold); font-weight: bold; width: 100%; text-align: center; }
+        
+        /* 擬真牌面內部結構 */
+        .card-inner {
+            flex: 1; width: 100%; position: relative; border-radius: 4px; background: #FFF;
+        }
+        .card-hidden {
+            width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;
+            font-size: 13px; color: #8FBC8F; background: #1B4D3E; border-radius: 4px;
+        }
+        .corner {
+            position: absolute; top: 2px; left: 3px; font-size: 10px; font-weight: bold; line-height: 1;
+        }
+        .corner-bottom {
+            position: absolute; bottom: 2px; right: 3px; font-size: 10px; font-weight: bold; line-height: 1; transform: rotate(180deg);
+        }
+        .pip-grid {
+            position: absolute; top: 14px; left: 14px; right: 14px; bottom: 14px;
+            display: grid; align-items: center; justify-items: center; font-size: 12px; pointer-events: none;
+        }
+        .court-img {
+            position: absolute; top: 14px; left: 12px; right: 12px; bottom: 14px;
+            display: flex; justify-content: center; align-items: center; font-size: 26px; font-weight: bold;
+        }
+
+        .suit-S { color: #1C1C1C; }
+        .suit-H { color: #D32F2F; }
+        .suit-D { color: #1976D2; }
+        .suit-C { color: #388E3C; }
+        .suit-JK { color: #7B1FA2; }
+
+        .info-bar {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;
+            background: #181818; padding: 6px; border-radius: 6px; font-weight: bold; font-size: 13px;
+        }
+        .credit { color: #00FF66; }
+        .bet { color: #FFCC00; }
+        .win { color: #FF3366; }
+
+        .payout-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; font-size: 10px;
+        }
+        .payout-item {
+            background: #222; padding: 3px; border-radius: 3px; text-align: center; color: #FFD700;
+        }
+        .payout-item.highlight {
+            background: #FFD700; color: #000; font-weight: bold;
+        }
+        .payout-item.sidepot-highlight {
+            background: #00CC66; color: #000; font-weight: bold;
+        }
+
+        .btn-group { display: flex; gap: 6px; }
+        button {
+            flex: 1; padding: 10px; font-size: 15px; font-weight: bold;
+            border: none; border-radius: 6px; cursor: pointer; color: #FFF;
+        }
+        .btn-action { background-color: #2E7D32; }
+        .btn-show { background-color: #C62828; }
+        .msg-box { text-align: center; font-size: 13px; font-weight: bold; color: #00FFCC; min-height: 20px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- 頂部看板：左 2/3 彩金池，右 1/3 小彩池 -->
+    <div class="top-panels">
+        <div class="jackpot-panel">
+            <div style="font-size: 9px; color: #FFD700;">🎰 連線彩金 (JACKPOT)</div>
+            <div id="jpVal" class="jp-val">$10,000.00</div>
+            <div id="jpTarget" style="font-size: 10px; color: #FF9900;">目標: 鐵支</div>
+        </div>
+        <div class="side-pot-panel">
+            <div style="font-size: 9px; color: #00FF99;">🎁 小彩池 (側池)</div>
+            <div id="spInfo" class="sp-val">順:500 / 同:750 / 葫:1000</div>
+            <div id="spActive" style="font-size: 10px; color: #FFD700;">未中獎</div>
+        </div>
+    </div>
+
+    <!-- 賠率表 -->
+    <div class="panel">
+        <div style="font-size: 9px; color: #888; margin-bottom: 3px;">💡 提示：順子(+500)、同花(+750)、葫蘆(+1000) 享有小彩池額外加碼！</div>
+        <div id="payoutGrid" class="payout-grid"></div>
+    </div>
+
+    <!-- 擬真 7 張牌桌 -->
+    <div class="table-frame" id="tableFrame"></div>
+
+    <!-- 籌碼資訊 -->
+    <div class="info-bar">
+        <div id="lblCredit" class="credit">籌碼: 5,000</div>
+        <div id="lblBet" class="bet">下注: 0</div>
+        <div id="lblPayout" class="win" style="grid-column: span 2;">派彩: 0</div>
+    </div>
+
+    <div id="msgBox" class="msg-box">點擊「開局 / 加注」開始遊戲</div>
+
+    <!-- 控制按鈕 -->
+    <div class="btn-group">
+        <button id="btnAction" class="btn-action" onclick="onActionClick()">開 局 / 加 注 (10)</button>
+        <button id="btnShow" class="btn-show" onclick="onShowClick()">全 開 (SHOW)</button>
+    </div>
+</div>
+
+<script>
+    const PAYOUT_TABLE = {
+        "五支": 500, "皇家同花順": 500, "同花順": 60, "鐵支": 25,
+        "葫蘆": 5, "同花": 3.5, "順子": 2.5, "三條": 1.5,
+        "兩對": 1, "大對子": 0.5, "烏龍": 0
+    };
+    const SIDE_POT = { "順子": 500, "同花": 750, "葫蘆": 1000 };
+    const SUITS = ['S', 'H', 'D', 'C'];
+    const SUIT_SYMS = { 'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣', 'JK': '🃏' };
+
+    let credit = parseInt(localStorage.getItem('7pk_credit')) || 5000;
+    let jackpotPool = 10000.0;
+    let jpTargetHand = "鐵支";
+    
+    let gameState = "IDLE";
+    let currentCards = [];
+    let visibleMask = [false, false, false, false, false, false, false];
+    let baseBet = 10;
+    let totalBet = 0;
+    let payout = 0;
+    let finalHandName = "";
+    let activeSidePot = "";
+
+    class Card {
+        constructor(suit, rank) {
+            this.suit = suit;
+            this.rank = rank;
+            this._rankNum = {'A':14,'K':13,'Q':12,'J':11}[rank] || parseInt(rank) || 0;
+        }
+        isJoker() { return this.suit === 'JK' || this.rank === 'JK'; }
+    }
+
+    function createDeck() {
+        let deck = [];
+        for (let s of SUITS) {
+            for (let r = 2; r <= 10; r++) deck.push(new Card(s, r.toString()));
+            ['J', 'Q', 'K', 'A'].forEach(r => deck.push(new Card(s, r)));
+        }
+        deck.push(new Card('JK', 'JK'));
+        deck.push(new Card('JK', 'JK'));
+        for (let i = deck.length - 1; i > 0; i--) {
+            let j = Math.floor(Math.random() * (i + 1));
+            [deck[i], deck[j]] = [deck[j], deck[i]];
+        }
+        return deck;
+    }
+
+    function eval5Pure(cards) {
+        let ranks = cards.map(c => c._rankNum).sort((a,b) => b - a);
+        let suits = cards.map(c => c.suit);
+        let isFlush = new Set(suits).size === 1;
+        
+        let rankSet = new Set(ranks);
+        let isStraight = false;
+        if (rankSet.size === 5) {
+            if (ranks[0] - ranks[4] === 4) isStraight = true;
+            else if (JSON.stringify(ranks) === JSON.stringify([14,5,4,3,2])) isStraight = true;
+        }
+
+        let counts = {};
+        ranks.forEach(r => counts[r] = (counts[r] || 0) + 1);
+        let freq = Object.values(counts).sort((a,b) => b - a);
+
+        if (freq[0] === 5) return [11, "五支"];
+        if (isFlush && isStraight) {
+            if (ranks[0] === 14 && ranks[1] === 13) return [10, "皇家同花順"];
+            return [9, "同花順"];
+        }
+        if (freq[0] === 4) return [8, "鐵支"];
+        if (freq[0] === 3 && freq[1] === 2) return [7, "葫蘆"];
+        if (isFlush) return [6, "同花"];
+        if (isStraight) return [5, "順子"];
+        if (freq[0] === 3) return [4, "三條"];
+        if (freq[0] === 2 && freq[1] === 2) return [3, "兩對"];
+        if (freq[0] === 2) {
+            let pairRank = parseInt(Object.keys(counts).find(k => counts[k] === 2));
+            if ([1, 14, 11, 12, 13].includes(pairRank)) return [2, "大對子"];
+            return [1, "烏龍"];
+        }
+        return [1, "烏龍"];
+    }
+
+    function eval5(cards) {
+        let normalCards = cards.filter(c => !c.isJoker());
+        let jokerCount = cards.length - normalCards.length;
+        if (jokerCount === 0) return eval5Pure(cards);
+
+        let bestScore = -1, bestName = "烏龍";
+        let possibleReplacements = [];
+        for (let s of SUITS) {
+            for (let r = 2; r <= 10; r++) possibleReplacements.push(new Card(s, r.toString()));
+            ['J', 'Q', 'K', 'A'].forEach(r => possibleReplacements.push(new Card(s, r)));
+        }
+
+        if (jokerCount === 1) {
+            for (let rep of possibleReplacements) {
+                let [score, name] = eval5Pure([...normalCards, rep]);
+                if (score > bestScore) { bestScore = score; bestName = name; }
+            }
+        } else if (jokerCount >= 2) {
+            for (let c1 of possibleReplacements) {
+                for (let c2 of possibleReplacements) {
+                    let [score, name] = eval5Pure([...normalCards, c1, c2]);
+                    if (score > bestScore) { bestScore = score; bestName = name; }
+                }
+            }
+        }
+        return [bestScore, bestName];
+    }
+
+    function eval7(cards7) {
+        let bestScore = -1, bestName = "烏龍";
+        function comb(arr, k, start = 0, path = []) {
+            if (path.length === k) {
+                let [score, name] = eval5(path);
+                if (score > bestScore) { bestScore = score; bestName = name; }
+                return;
+            }
+            for (let i = start; i < arr.length; i++) {
+                comb(arr, k, i + 1, [...path, arr[i]]);
+            }
+        }
+        comb(cards7, 5);
+        return bestName;
+    }
+
+    function initUI() {
+        let grid = document.getElementById('payoutGrid');
+        grid.innerHTML = '';
+        for (let [hand, mult] of Object.entries(PAYOUT_TABLE)) {
+            if (mult > 0) {
+                let div = document.createElement('div');
+                div.className = 'payout-item';
+                div.id = `pay_${hand}`;
+                div.innerText = SIDE_POT[hand] ? `${hand}\nx${mult} (+${SIDE_POT[hand]})` : `${hand}\nx${mult}`;
+                grid.appendChild(div);
+            }
+        }
+
+        let table = document.getElementById('tableFrame');
+        table.innerHTML = '';
+        const labels = ["張1(主)", "張2(主)", "張3(主)", "張4(隨機)", "張5(1帶5)", "張6(2帶6)", "張7(3帶7)"];
+        for (let i = 0; i < 7; i++) {
+            let box = document.createElement('div');
+            box.className = 'card-box';
+            box.id = `cardBox_${i}`;
+            box.innerHTML = `
+                <div class="card-pos">${labels[i]}</div>
+                <div class="card-inner" id="cardContent_${i}"><div class="card-hidden">***</div></div>
+            `;
+            table.appendChild(box);
+        }
+        updateUI();
+    }
+
+    // 擬真產生牌面點數佈局 (2-10 產生對應數量的符號圖示)
+    function renderCardInner(c) {
+        let sym = SUIT_SYMS[c.suit];
+        let suitClass = `suit-${c.suit}`;
+        if (c.isJoker()) {
+            return `<div class="court-img ${suitClass}">🃏<br><span style="font-size:12px;">JOKER</span></div>`;
+        }
+
+        let r = c.rank;
+        if (['J', 'Q', 'K', 'A'].includes(r)) {
+            let icon = {'J':'🤴','Q':'👸','K':'👑','A':'Ace'}[r];
+            return `
+                <div class="corner ${suitClass}">${r}<br>${sym}</div>
+                <div class="corner-bottom ${suitClass}">${r}<br>${sym}</div>
+                <div class="court-img ${suitClass}">${icon}</div>
+            `;
+        }
+
+        // 數字牌 2~10 依序產生對應數量的 pip
+        let count = parseInt(r);
+        let pipsHtml = '';
+        for (let i = 0; i < count; i++) {
+            pipsHtml += `<span>${sym}</span>`;
+        }
+        // 依照數字動態調整網格行列
+        let gridCols = count <= 3 ? 1 : (count <= 8 ? 2 : 3);
+        return `
+            <div class="corner ${suitClass}">${r}<br>${sym}</div>
+            <div class="corner-bottom ${suitClass}">${r}<br>${sym}</div>
+            <div class="pip-grid ${suitClass}" style="grid-template-columns: repeat(${gridCols}, 1fr); font-size: ${count > 6 ? '9px' : '11px'};">
+                ${pipsHtml}
+            </div>
+        `;
+    }
+
+    function updateUI() {
+        document.getElementById('lblCredit').innerText = `籌碼: ${credit.toLocaleString()}`;
+        document.getElementById('lblBet').innerText = `下注: ${totalBet.toLocaleString()}`;
+        document.getElementById('lblPayout').innerText = `派彩: ${payout.toLocaleString()}`;
+        document.getElementById('jpVal').innerText = `$${jackpotPool.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+        document.getElementById('jpTarget').innerText = `目標: ${jpTargetHand}`;
+
+        if (activeSidePot) {
+            document.getElementById('spActive').innerHTML = `<span style="color:#00FFCC;">🔥 命中 ${activeSidePot} +${SIDE_POT[activeSidePot]}</span>`;
+        } else {
+            document.getElementById('spActive').innerText = "未中側池加碼";
+        }
+
+        for (let i = 0; i < 7; i++) {
+            let box = document.getElementById(`cardBox_${i}`);
+            let content = document.getElementById(`cardContent_${i}`);
+            if (visibleMask[i] && currentCards.length > 0) {
+                box.classList.add('visible');
+                content.innerHTML = renderCardInner(currentCards[i]);
+            } else {
+                box.classList.remove('visible');
+                content.innerHTML = `<div class="card-hidden">***</div>`;
+            }
+        }
+
+        document.querySelectorAll('.payout-item').forEach(el => {
+            el.classList.remove('highlight');
+            el.classList.remove('sidepot-highlight');
+        });
+
+        if (finalHandName) {
+            let activePay = document.getElementById(`pay_${finalHandName}`);
+            if (activePay) {
+                if (activeSidePot && finalHandName === activeSidePot) {
+                    activePay.classList.add('sidepot-highlight');
+                } else {
+                    activePay.classList.add('highlight');
+                }
+            }
+        }
+
+        let btnAction = document.getElementById('btnAction');
+        if (gameState === "IDLE" || gameState === "GAME_OVER") {
+            btnAction.innerText = "開 局 / 加 注 (10)";
+            btnAction.style.backgroundColor = "#2E7D32";
+        } else {
+            btnAction.innerText = "加 注 (10)";
+            btnAction.style.backgroundColor = "#1976D2";
+        }
+
+        localStorage.setItem('7pk_credit', credit);
+    }
+
+    function onActionClick() {
+        if (gameState === "IDLE" || gameState === "GAME_OVER") {
+            credit -= baseBet;
+            totalBet = baseBet;
+            jackpotPool += 0.2;
+            
+            currentCards = createDeck().slice(0, 7);
+            visibleMask = [true, true, true, false, false, false, false]; 
+            gameState = "STAGE_1";
+            payout = 0;
+            finalHandName = "";
+            activeSidePot = "";
+            
+            document.getElementById('msgBox').innerText = "【第 1 階段】已發前三張牌";
+        } else if (gameState === "STAGE_1") {
+            credit -= baseBet;
+            totalBet += baseBet;
+            jackpotPool += 0.2;
+            visibleMask[4] = true; 
+            gameState = "STAGE_2";
+            document.getElementById('msgBox').innerText = "【第 2 階段】翻開第 5 張牌";
+        } else if (gameState === "STAGE_2") {
+            credit -= baseBet;
+            totalBet += baseBet;
+            jackpotPool += 0.2;
+            visibleMask[5] = true; 
+            gameState = "STAGE_3";
+            document.getElementById('msgBox').innerText = "【第 3 階段】翻開第 6 張牌";
+        } else if (gameState === "STAGE_3") {
+            credit -= baseBet;
+            totalBet += baseBet;
+            jackpotPool += 0.2;
+            visibleMask[3] = true; 
+            visibleMask[6] = true; 
+            finalizeGame();
+        }
+        updateUI();
+    }
+
+    function onShowClick() {
+        if (gameState === "IDLE" || gameState === "GAME_OVER") return;
+        visibleMask = [true, true, true, true, true, true, true];
+        finalizeGame();
+        updateUI();
+    }
+
+    function finalizeGame() {
+        gameState = "GAME_OVER";
+        finalHandName = eval7(currentCards);
+
+        let mult = PAYOUT_TABLE[finalHandName] || 0;
+        payout = totalBet * mult;
+
+        activeSidePot = "";
+        if (SIDE_POT[finalHandName]) {
+            let bonus = SIDE_POT[finalHandName];
+            payout += bonus;
+            activeSidePot = finalHandName;
+        }
+
+        let wonJp = (finalHandName === jpTargetHand);
+        if (wonJp) {
+            payout += jackpotPool + (totalBet * mult);
+            jackpotPool = 10000.0;
+            jpTargetHand = ["同花順", "鐵支", "葫蘆"][Math.floor(Math.random() * 3)];
+            document.getElementById('msgBox').innerHTML = `🎉 <span style="color:#FFD700;">恭喜中彩金 JP！獲得獎金 ${payout.toLocaleString()} 點！</span>`;
+        } else {
+            let sideMsg = activeSidePot ? ` (含小彩池 +${SIDE_POT[activeSidePot]})` : "";
+            document.getElementById('msgBox').innerText = `結算牌型：【${finalHandName}】${sideMsg} 派彩 ${payout.toLocaleString()} 點`;
+        }
+
+        if (payout > 0) {
+            credit += Math.round(payout);
+        }
+    }
+
+    window.onload = initUI;
+</script>
+
+</body>
+</html>
